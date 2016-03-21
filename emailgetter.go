@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -12,12 +11,6 @@ import (
 	"sync"
 )
 
-var username = flag.String("username", "", "Username to execute the query")
-var followers = flag.Bool("followers", false, "Get emails of follower users")
-var following = flag.Bool("following", false, "Get emails of following users")
-var noemails = flag.Bool("noemails", false, "Get the usernames instead of the emails")
-var page = flag.Int("page", 1, "Page number for following and followers")
-
 type EmailGetter struct {
 	Addresses  []string
 	RateLimit  bool
@@ -25,64 +18,64 @@ type EmailGetter struct {
 	PageNumber int
 }
 
-func (getter *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
+func (e *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
 	defer wg.Done()
 
-	if getter.OnlyUsers {
+	if e.OnlyUsers {
 		fmt.Println(username)
 		return
 	}
 
 	/* Try to get it from the API */
-	found := getter.ExtractFromAPI(username)
+	found := e.ExtractFromAPI(username)
 
 	if found == false {
 		/* Try to get it from the profile page */
-		found = getter.ExtractFromProfile(username)
+		found = e.ExtractFromProfile(username)
 
 		if found == false {
 			/* Try to get it from the events endpoint */
-			found = getter.ExtractFromActivity(username)
+			found = e.ExtractFromActivity(username)
 		}
 	}
 }
 
-func (getter *EmailGetter) RetrieveFollowers(wg *sync.WaitGroup, username string) {
-	getter.FriendEmails(wg, username, "followers")
+func (e *EmailGetter) RetrieveFollowers(wg *sync.WaitGroup, username string) {
+	e.FriendEmails(wg, username, "followers")
 }
 
-func (getter *EmailGetter) RetrieveFollowing(wg *sync.WaitGroup, username string) {
-	getter.FriendEmails(wg, username, "following")
+func (e *EmailGetter) RetrieveFollowing(wg *sync.WaitGroup, username string) {
+	e.FriendEmails(wg, username, "following")
 }
 
-func (getter *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string, group string) {
-	if getter.PageNumber > 1 {
-		group += "?page=" + strconv.Itoa(getter.PageNumber)
+func (e *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string, group string) {
+	if e.PageNumber > 1 {
+		group += "?page=" + strconv.Itoa(e.PageNumber)
 	}
 
-	content := getter.Request("https://github.com/" + username + "/" + group)
+	content := e.Request("https://github.com/" + username + "/" + group)
 	pattern := regexp.MustCompile(`<img alt="@([^"]+)"`)
 	friends := pattern.FindAllStringSubmatch(string(content), -1)
 
 	for _, data := range friends {
 		if data[1] != username {
 			wg.Add(1) /* Add more emails */
-			go getter.RetrieveEmail(wg, data[1])
+			go e.RetrieveEmail(wg, data[1])
 		}
 	}
 }
 
-func (getter *EmailGetter) ExtractFromAPI(username string) bool {
+func (e *EmailGetter) ExtractFromAPI(username string) bool {
 	/* Skip if API is rate limited */
-	if getter.RateLimit == true {
+	if e.RateLimit == true {
 		return false
 	}
 
-	content := getter.Request("https://api.github.com/users/" + username)
+	content := e.Request("https://api.github.com/users/" + username)
 	output := string(content) /* Convert to facilitate readability */
 
 	if strings.Contains(output, "rate limit exceeded") {
-		getter.RateLimit = true
+		e.RateLimit = true
 		return false
 	}
 
@@ -90,14 +83,14 @@ func (getter *EmailGetter) ExtractFromAPI(username string) bool {
 	data := pattern.FindStringSubmatch(output)
 
 	if len(data) == 2 && data[1] != "" {
-		return getter.AppendEmail(data[1])
+		return e.AppendEmail(data[1])
 	}
 
 	return false
 }
 
-func (getter *EmailGetter) ExtractFromProfile(username string) bool {
-	content := getter.Request("https://github.com/" + username)
+func (e *EmailGetter) ExtractFromProfile(username string) bool {
+	content := e.Request("https://github.com/" + username)
 	pattern := regexp.MustCompile(`"mailto:([^"]+)"`)
 	data := pattern.FindStringSubmatch(string(content))
 
@@ -108,30 +101,30 @@ func (getter *EmailGetter) ExtractFromProfile(username string) bool {
 		urlEncoded = strings.Replace(urlEncoded, "&#x", "%", -1)
 
 		if out, err := url.QueryUnescape(urlEncoded); err == nil {
-			return getter.AppendEmail(string(out))
+			return e.AppendEmail(string(out))
 		}
 	}
 
 	return false
 }
 
-func (getter *EmailGetter) ExtractFromActivity(username string) bool {
+func (e *EmailGetter) ExtractFromActivity(username string) bool {
 	/* Skip if API is rate limited */
-	if getter.RateLimit == true {
+	if e.RateLimit == true {
 		return false
 	}
 
-	content := getter.Request("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
+	content := e.Request("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
 	pattern := regexp.MustCompile(`"full_name": "([^"]+)",`)
 	data := pattern.FindStringSubmatch(string(content))
 
 	if len(data) == 2 && data[1] != "" {
-		commits := getter.Request("https://api.github.com/repos/" + data[1] + "/commits")
+		commits := e.Request("https://api.github.com/repos/" + data[1] + "/commits")
 		expression := regexp.MustCompile(`"email": "([^"]+)",`)
 		matches := expression.FindAllStringSubmatch(string(commits), -1)
 
 		for _, match := range matches {
-			getter.AppendEmail(match[1])
+			e.AppendEmail(match[1])
 		}
 
 		return len(matches) > 0
@@ -140,7 +133,7 @@ func (getter *EmailGetter) ExtractFromActivity(username string) bool {
 	return false
 }
 
-func (getter *EmailGetter) Request(url string) []byte {
+func (e *EmailGetter) Request(url string) []byte {
 	client := http.Client{}
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -170,10 +163,10 @@ func (getter *EmailGetter) Request(url string) []byte {
 	return content
 }
 
-func (getter *EmailGetter) AppendEmail(email string) bool {
+func (e *EmailGetter) AppendEmail(email string) bool {
 	var isAlreadyAdded bool = false
 
-	for _, item := range getter.Addresses {
+	for _, item := range e.Addresses {
 		if item == email {
 			isAlreadyAdded = true
 			break
@@ -181,54 +174,14 @@ func (getter *EmailGetter) AppendEmail(email string) bool {
 	}
 
 	if isAlreadyAdded == false {
-		getter.Addresses = append(getter.Addresses, email)
+		e.Addresses = append(e.Addresses, email)
 	}
 
 	return true
 }
 
-func (getter *EmailGetter) PrintEmails() {
-	for _, email := range getter.Addresses {
+func (e *EmailGetter) PrintEmails() {
+	for _, email := range e.Addresses {
 		fmt.Println(email)
 	}
-}
-
-func main() {
-	flag.Usage = func() {
-		fmt.Println("E-Mail Getter")
-		fmt.Println("  http://cixtor.com/")
-		fmt.Println("  https://github.com/cixtor/emailgetter")
-		fmt.Println("  https://en.wikipedia.org/wiki/Email_address_harvesting")
-		fmt.Println("Usage:")
-		flag.PrintDefaults()
-	}
-
-	flag.Parse()
-
-	if *username == "" {
-		fmt.Println("Missing username to query")
-		flag.Usage()
-	}
-
-	var wg sync.WaitGroup
-	var getter EmailGetter
-
-	getter.PageNumber = *page
-
-	if *noemails {
-		getter.OnlyUsers = true
-	}
-
-	wg.Add(1) /* At least wait for one */
-	go getter.RetrieveEmail(&wg, *username)
-
-	if *following == true {
-		getter.RetrieveFollowing(&wg, *username)
-	} else if *followers == true {
-		getter.RetrieveFollowers(&wg, *username)
-	}
-
-	wg.Wait()
-
-	getter.PrintEmails()
 }
