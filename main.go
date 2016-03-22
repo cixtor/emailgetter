@@ -27,6 +27,7 @@ func main() {
 	if *username == "" {
 		fmt.Println("Missing username to query")
 		flag.Usage()
+		return
 	}
 
 	var wg sync.WaitGroup
