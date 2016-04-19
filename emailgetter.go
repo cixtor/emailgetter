@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"regexp"
 )
 
 var username = flag.String("u", "", "Username to query")
@@ -40,6 +41,30 @@ func httpGetRequest(url string) []byte {
 	return content
 }
 
+func extractFromAPI(username string) (string, bool) {
+	content := httpGetRequest("https://api.github.com/users/" + username)
+	pattern := regexp.MustCompile(`"email": "([^"]+)",`)
+	data := pattern.FindStringSubmatch(string(content))
+
+	if len(data) == 2 && data[1] != "" {
+		return data[1], true
+	}
+
+	return "", false
+}
+
+func printProfileEmail(username string) {
+	var email string = ""
+	var found bool = false
+
+	email, found = extractFromAPI(username)
+
+	if found == true {
+		fmt.Println(email)
+		return
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -58,5 +83,5 @@ func main() {
 		flag.Usage()
 	}
 
-	fmt.Println(*username)
+	printProfileEmail(*username)
 }
