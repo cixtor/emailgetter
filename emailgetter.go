@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
+	"strings"
 )
 
 var username = flag.String("u", "", "Username to query")
@@ -53,11 +55,41 @@ func extractFromAPI(username string) (string, bool) {
 	return "", false
 }
 
+func extractFromProfile(username string) (string, bool) {
+	content := httpGetRequest("https://github.com/" + username)
+	pattern := regexp.MustCompile(`"mailto:([^"]+)"`)
+	data := pattern.FindStringSubmatch(string(content))
+
+	if len(data) == 2 && data[1] != "" {
+		var urlEncoded string = data[1]
+
+		urlEncoded = strings.Replace(urlEncoded, ";", "", -1)
+		urlEncoded = strings.Replace(urlEncoded, "&#x", "%", -1)
+
+		output, err := url.QueryUnescape(urlEncoded)
+
+		if err != nil {
+			return "", false
+		}
+
+		return string(output), true
+	}
+
+	return "", false
+}
+
 func printProfileEmail(username string) {
 	var email string = ""
 	var found bool = false
 
 	email, found = extractFromAPI(username)
+
+	if found == true {
+		fmt.Println(email)
+		return
+	}
+
+	email, found = extractFromProfile(username)
 
 	if found == true {
 		fmt.Println(email)
