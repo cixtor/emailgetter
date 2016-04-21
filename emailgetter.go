@@ -78,6 +78,28 @@ func extractFromProfile(username string) (string, bool) {
 	return "", false
 }
 
+func extractFromActivity(username string) (string, bool) {
+	content := httpGetRequest("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
+	pattern := regexp.MustCompile(`"full_name": "([^"]+)",`)
+	data := pattern.FindStringSubmatch(string(content))
+
+	if len(data) == 2 && data[1] != "" {
+		var emails []string
+
+		commits := httpGetRequest("https://api.github.com/repos/" + data[1] + "/commits")
+		expression := regexp.MustCompile(`"email": "([^"]+)",`)
+		matches := expression.FindAllStringSubmatch(string(commits), -1)
+
+		for _, match := range matches {
+			emails = append(emails, match[1])
+		}
+
+		return strings.Join(emails, "\n"), true
+	}
+
+	return "", false
+}
+
 func printProfileEmail(username string) {
 	var email string = ""
 	var found bool = false
@@ -90,6 +112,13 @@ func printProfileEmail(username string) {
 	}
 
 	email, found = extractFromProfile(username)
+
+	if found == true {
+		fmt.Println(email)
+		return
+	}
+
+	email, found = extractFromActivity(username)
 
 	if found == true {
 		fmt.Println(email)
