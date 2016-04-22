@@ -11,7 +11,8 @@ import (
 	"strings"
 )
 
-var username = flag.String("u", "", "Username to query")
+var username = flag.String("username", "", "Username to execute the query")
+var friends = flag.Bool("friends", false, "Get emails of following users")
 
 func httpGetRequest(url string) []byte {
 	client := http.Client{}
@@ -126,6 +127,18 @@ func printProfileEmail(username string) {
 	}
 }
 
+func printFriendEmails(username string) {
+	content := httpGetRequest("https://github.com/" + username + "/following")
+	pattern := regexp.MustCompile(`<img alt="@([^"]+)"`)
+	friends := pattern.FindAllStringSubmatch(string(content), -1)
+
+	for _, data := range friends {
+		if data[1] != username {
+			printProfileEmail(data[1])
+		}
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -145,4 +158,8 @@ func main() {
 	}
 
 	printProfileEmail(*username)
+
+	if *friends == true {
+		printFriendEmails(*username)
+	}
 }
