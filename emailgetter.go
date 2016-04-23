@@ -14,7 +14,91 @@ import (
 var username = flag.String("username", "", "Username to execute the query")
 var friends = flag.Bool("friends", false, "Get emails of following users")
 
-func httpGetRequest(url string) []byte {
+type EmailGetter struct {
+	Addresses []string
+	RateLimit bool
+}
+
+func (getter *EmailGetter) RetrieveEmail(username string) {
+	var found bool = false
+
+	if found = getter.ExtractFromAPI(username); found {
+		return
+	}
+
+	if found = getter.ExtractFromProfile(username); found {
+		return
+	}
+
+	if found = getter.ExtractFromActivity(username); found {
+		return
+	}
+}
+
+func (getter *EmailGetter) FriendEmails(username string) {
+	content := getter.Request("https://github.com/" + username + "/following")
+	pattern := regexp.MustCompile(`<img alt="@([^"]+)"`)
+	friends := pattern.FindAllStringSubmatch(string(content), -1)
+
+	for _, data := range friends {
+		if data[1] != username {
+			getter.RetrieveEmail(data[1])
+		}
+	}
+}
+
+func (getter *EmailGetter) ExtractFromAPI(username string) bool {
+	content := getter.Request("https://api.github.com/users/" + username)
+	pattern := regexp.MustCompile(`"email": "([^"]+)",`)
+	data := pattern.FindStringSubmatch(string(content))
+
+	if len(data) == 2 && data[1] != "" {
+		return getter.AppendEmail(data[1])
+	}
+
+	return false
+}
+
+func (getter *EmailGetter) ExtractFromProfile(username string) bool {
+	content := getter.Request("https://github.com/" + username)
+	pattern := regexp.MustCompile(`"mailto:([^"]+)"`)
+	data := pattern.FindStringSubmatch(string(content))
+
+	if len(data) == 2 && data[1] != "" {
+		var urlEncoded string = data[1]
+
+		urlEncoded = strings.Replace(urlEncoded, ";", "", -1)
+		urlEncoded = strings.Replace(urlEncoded, "&#x", "%", -1)
+
+		if out, err := url.QueryUnescape(urlEncoded); err == nil {
+			return getter.AppendEmail(string(out))
+		}
+	}
+
+	return false
+}
+
+func (getter *EmailGetter) ExtractFromActivity(username string) bool {
+	content := getter.Request("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
+	pattern := regexp.MustCompile(`"full_name": "([^"]+)",`)
+	data := pattern.FindStringSubmatch(string(content))
+
+	if len(data) == 2 && data[1] != "" {
+		commits := getter.Request("https://api.github.com/repos/" + data[1] + "/commits")
+		expression := regexp.MustCompile(`"email": "([^"]+)",`)
+		matches := expression.FindAllStringSubmatch(string(commits), -1)
+
+		for _, match := range matches {
+			getter.AppendEmail(match[1])
+		}
+
+		return len(matches) > 0
+	}
+
+	return false
+}
+
+func (getter *EmailGetter) Request(url string) []byte {
 	client := http.Client{}
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -44,98 +128,26 @@ func httpGetRequest(url string) []byte {
 	return content
 }
 
-func extractFromAPI(username string) (string, bool) {
-	content := httpGetRequest("https://api.github.com/users/" + username)
-	pattern := regexp.MustCompile(`"email": "([^"]+)",`)
-	data := pattern.FindStringSubmatch(string(content))
+func (getter *EmailGetter) AppendEmail(email string) bool {
+	var isAlreadyAdded bool = false
 
-	if len(data) == 2 && data[1] != "" {
-		return data[1], true
-	}
-
-	return "", false
-}
-
-func extractFromProfile(username string) (string, bool) {
-	content := httpGetRequest("https://github.com/" + username)
-	pattern := regexp.MustCompile(`"mailto:([^"]+)"`)
-	data := pattern.FindStringSubmatch(string(content))
-
-	if len(data) == 2 && data[1] != "" {
-		var urlEncoded string = data[1]
-
-		urlEncoded = strings.Replace(urlEncoded, ";", "", -1)
-		urlEncoded = strings.Replace(urlEncoded, "&#x", "%", -1)
-
-		output, err := url.QueryUnescape(urlEncoded)
-
-		if err != nil {
-			return "", false
+	for _, item := range getter.Addresses {
+		if item == email {
+			isAlreadyAdded = true
+			break
 		}
-
-		return string(output), true
 	}
 
-	return "", false
+	if isAlreadyAdded == false {
+		getter.Addresses = append(getter.Addresses, email)
+	}
+
+	return true
 }
 
-func extractFromActivity(username string) (string, bool) {
-	content := httpGetRequest("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
-	pattern := regexp.MustCompile(`"full_name": "([^"]+)",`)
-	data := pattern.FindStringSubmatch(string(content))
-
-	if len(data) == 2 && data[1] != "" {
-		var emails []string
-
-		commits := httpGetRequest("https://api.github.com/repos/" + data[1] + "/commits")
-		expression := regexp.MustCompile(`"email": "([^"]+)",`)
-		matches := expression.FindAllStringSubmatch(string(commits), -1)
-
-		for _, match := range matches {
-			emails = append(emails, match[1])
-		}
-
-		return strings.Join(emails, "\n"), true
-	}
-
-	return "", false
-}
-
-func printProfileEmail(username string) {
-	var email string = ""
-	var found bool = false
-
-	email, found = extractFromAPI(username)
-
-	if found == true {
+func (getter *EmailGetter) PrintEmails() {
+	for _, email := range getter.Addresses {
 		fmt.Println(email)
-		return
-	}
-
-	email, found = extractFromProfile(username)
-
-	if found == true {
-		fmt.Println(email)
-		return
-	}
-
-	email, found = extractFromActivity(username)
-
-	if found == true {
-		fmt.Println(email)
-		return
-	}
-}
-
-func printFriendEmails(username string) {
-	content := httpGetRequest("https://github.com/" + username + "/following")
-	pattern := regexp.MustCompile(`<img alt="@([^"]+)"`)
-	friends := pattern.FindAllStringSubmatch(string(content), -1)
-
-	for _, data := range friends {
-		if data[1] != username {
-			printProfileEmail(data[1])
-		}
 	}
 }
 
@@ -157,9 +169,13 @@ func main() {
 		flag.Usage()
 	}
 
-	printProfileEmail(*username)
+	var getter EmailGetter
+
+	getter.RetrieveEmail(*username)
 
 	if *friends == true {
-		printFriendEmails(*username)
+		getter.FriendEmails(*username)
 	}
+
+	getter.PrintEmails()
 }
