@@ -48,9 +48,21 @@ func (getter *EmailGetter) FriendEmails(username string) {
 }
 
 func (getter *EmailGetter) ExtractFromAPI(username string) bool {
+	/* Skip if API is rate limited */
+	if getter.RateLimit == true {
+		return false
+	}
+
 	content := getter.Request("https://api.github.com/users/" + username)
+	output := string(content) /* Convert to facilitate readability */
+
+	if strings.Contains(output, "rate limit exceeded") {
+		getter.RateLimit = true
+		return false
+	}
+
 	pattern := regexp.MustCompile(`"email": "([^"]+)",`)
-	data := pattern.FindStringSubmatch(string(content))
+	data := pattern.FindStringSubmatch(output)
 
 	if len(data) == 2 && data[1] != "" {
 		return getter.AppendEmail(data[1])
@@ -79,6 +91,11 @@ func (getter *EmailGetter) ExtractFromProfile(username string) bool {
 }
 
 func (getter *EmailGetter) ExtractFromActivity(username string) bool {
+	/* Skip if API is rate limited */
+	if getter.RateLimit == true {
+		return false
+	}
+
 	content := getter.Request("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
 	pattern := regexp.MustCompile(`"full_name": "([^"]+)",`)
 	data := pattern.FindStringSubmatch(string(content))
