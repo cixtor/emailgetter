@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 var username = flag.String("username", "", "Username to execute the query")
@@ -19,30 +20,32 @@ type EmailGetter struct {
 	RateLimit bool
 }
 
-func (getter *EmailGetter) RetrieveEmail(username string) {
-	var found bool = false
+func (getter *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
+	/* Try to get it from the API */
+	found := getter.ExtractFromAPI(username)
 
-	if found = getter.ExtractFromAPI(username); found {
-		return
+	if found == false {
+		/* Try to get it from the profile page */
+		found = getter.ExtractFromProfile(username)
+
+		if found == false {
+			/* Try to get it from the events endpoint */
+			found = getter.ExtractFromActivity(username)
+		}
 	}
 
-	if found = getter.ExtractFromProfile(username); found {
-		return
-	}
-
-	if found = getter.ExtractFromActivity(username); found {
-		return
-	}
+	defer wg.Done()
 }
 
-func (getter *EmailGetter) FriendEmails(username string) {
+func (getter *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string) {
 	content := getter.Request("https://github.com/" + username + "/following")
 	pattern := regexp.MustCompile(`<img alt="@([^"]+)"`)
 	friends := pattern.FindAllStringSubmatch(string(content), -1)
 
 	for _, data := range friends {
 		if data[1] != username {
-			getter.RetrieveEmail(data[1])
+			wg.Add(1) /* Add more emails */
+			go getter.RetrieveEmail(wg, data[1])
 		}
 	}
 }
@@ -186,13 +189,17 @@ func main() {
 		flag.Usage()
 	}
 
+	var wg sync.WaitGroup
 	var getter EmailGetter
 
-	getter.RetrieveEmail(*username)
+	wg.Add(1) /* At least wait for one */
+	go getter.RetrieveEmail(&wg, *username)
 
 	if *friends == true {
-		getter.FriendEmails(*username)
+		getter.FriendEmails(&wg, *username)
 	}
+
+	wg.Wait()
 
 	getter.PrintEmails()
 }
