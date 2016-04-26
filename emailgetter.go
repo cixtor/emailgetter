@@ -13,7 +13,8 @@ import (
 )
 
 var username = flag.String("username", "", "Username to execute the query")
-var friends = flag.Bool("friends", false, "Get emails of following users")
+var followers = flag.Bool("followers", false, "Get emails of follower users")
+var following = flag.Bool("following", false, "Get emails of following users")
 
 type EmailGetter struct {
 	Addresses []string
@@ -37,8 +38,16 @@ func (getter *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
 	defer wg.Done()
 }
 
-func (getter *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string) {
-	content := getter.Request("https://github.com/" + username + "/following")
+func (getter *EmailGetter) RetrieveFollowers(wg *sync.WaitGroup, username string) {
+	getter.FriendEmails(wg, username, "followers")
+}
+
+func (getter *EmailGetter) RetrieveFollowing(wg *sync.WaitGroup, username string) {
+	getter.FriendEmails(wg, username, "following")
+}
+
+func (getter *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string, group string) {
+	content := getter.Request("https://github.com/" + username + "/" + group)
 	pattern := regexp.MustCompile(`<img alt="@([^"]+)"`)
 	friends := pattern.FindAllStringSubmatch(string(content), -1)
 
@@ -195,8 +204,10 @@ func main() {
 	wg.Add(1) /* At least wait for one */
 	go getter.RetrieveEmail(&wg, *username)
 
-	if *friends == true {
-		getter.FriendEmails(&wg, *username)
+	if *following == true {
+		getter.RetrieveFollowing(&wg, *username)
+	} else if *followers == true {
+		getter.RetrieveFollowers(&wg, *username)
 	}
 
 	wg.Wait()
