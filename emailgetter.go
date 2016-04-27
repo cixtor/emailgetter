@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -15,10 +16,12 @@ import (
 var username = flag.String("username", "", "Username to execute the query")
 var followers = flag.Bool("followers", false, "Get emails of follower users")
 var following = flag.Bool("following", false, "Get emails of following users")
+var page = flag.Int("page", 1, "Page number for following and followers")
 
 type EmailGetter struct {
-	Addresses []string
-	RateLimit bool
+	Addresses  []string
+	RateLimit  bool
+	PageNumber int
 }
 
 func (getter *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
@@ -47,6 +50,10 @@ func (getter *EmailGetter) RetrieveFollowing(wg *sync.WaitGroup, username string
 }
 
 func (getter *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string, group string) {
+	if getter.PageNumber > 1 {
+		group += "?page=" + strconv.Itoa(getter.PageNumber)
+	}
+
 	content := getter.Request("https://github.com/" + username + "/" + group)
 	pattern := regexp.MustCompile(`<img alt="@([^"]+)"`)
 	friends := pattern.FindAllStringSubmatch(string(content), -1)
@@ -200,6 +207,8 @@ func main() {
 
 	var wg sync.WaitGroup
 	var getter EmailGetter
+
+	getter.PageNumber = *page
 
 	wg.Add(1) /* At least wait for one */
 	go getter.RetrieveEmail(&wg, *username)
