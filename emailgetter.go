@@ -16,15 +16,24 @@ import (
 var username = flag.String("username", "", "Username to execute the query")
 var followers = flag.Bool("followers", false, "Get emails of follower users")
 var following = flag.Bool("following", false, "Get emails of following users")
+var noemails = flag.Bool("noemails", false, "Get the usernames instead of the emails")
 var page = flag.Int("page", 1, "Page number for following and followers")
 
 type EmailGetter struct {
 	Addresses  []string
 	RateLimit  bool
+	OnlyUsers  bool
 	PageNumber int
 }
 
 func (getter *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
+	defer wg.Done()
+
+	if getter.OnlyUsers {
+		fmt.Println(username)
+		return
+	}
+
 	/* Try to get it from the API */
 	found := getter.ExtractFromAPI(username)
 
@@ -37,8 +46,6 @@ func (getter *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
 			found = getter.ExtractFromActivity(username)
 		}
 	}
-
-	defer wg.Done()
 }
 
 func (getter *EmailGetter) RetrieveFollowers(wg *sync.WaitGroup, username string) {
@@ -209,6 +216,10 @@ func main() {
 	var getter EmailGetter
 
 	getter.PageNumber = *page
+
+	if *noemails {
+		getter.OnlyUsers = true
+	}
 
 	wg.Add(1) /* At least wait for one */
 	go getter.RetrieveEmail(&wg, *username)
