@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -195,17 +194,16 @@ func (getter *EmailGetter) PrintEmails() {
 }
 
 func main() {
-	flag.Parse()
-
 	flag.Usage = func() {
 		fmt.Println("E-Mail Getter")
-		fmt.Println("http://cixtor.com/")
-		fmt.Println("https://github.com/cixtor/emailgetter")
-
+		fmt.Println("  http://cixtor.com/")
+		fmt.Println("  https://github.com/cixtor/emailgetter")
+		fmt.Println("  https://en.wikipedia.org/wiki/Email_address_harvesting")
+		fmt.Println("Usage:")
 		flag.PrintDefaults()
-
-		os.Exit(2)
 	}
+
+	flag.Parse()
 
 	if *username == "" {
 		fmt.Println("Missing username to query")
