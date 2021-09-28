@@ -170,10 +170,10 @@ func (e *EmailGetter) ExtractFromActivity(username string) bool {
 	return false
 }
 
+var httpClient = http.Client{}
+
 // Request sends a HTTP GET request to the URL passed in the parameters.
 func (e *EmailGetter) Request(url string) []byte {
-	client := http.Client{}
-
 	req, err := http.NewRequest("GET", url, nil)
 
 	req.Header.Set("DNT", "1")
@@ -187,7 +187,7 @@ func (e *EmailGetter) Request(url string) []byte {
 		panic(err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 
 	if err != nil {
 		panic(err)
