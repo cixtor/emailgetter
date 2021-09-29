@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // EmailGetter defines the structure that will contain the email addresses found
@@ -38,18 +40,17 @@ func (e *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
 		return
 	}
 
-	/* Try to get it from the API */
-	found := e.ExtractFromAPI(username)
-
-	if !found {
-		/* Try to get it from the profile page */
-		found = e.ExtractFromProfile(username)
-
-		if !found {
-			/* Try to get it from the events endpoint */
-			e.ExtractFromActivity(username)
-		}
+	if e.ExtractFromAPI(username) {
+		// Try to get it from the API.
+		return
 	}
+
+	if e.ExtractFromProfile(username) {
+		// Try to get it from the profile page.
+		return
+	}
+
+	e.ExtractFromActivity(username)
 }
 
 // RetrieveFollowers will try to find a valid email address for all the user
@@ -77,7 +78,12 @@ func (e *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string, group st
 		group += "?page=" + strconv.Itoa(e.PageNumber)
 	}
 
-	content := e.Request("https://github.com/" + username + "/" + group)
+	content, err := e.Request("https://github.com/" + username + "/" + group)
+
+	if err != nil {
+		return
+	}
+
 	pattern := regexp.MustCompile(`<img alt="@([^"]+)"`)
 	friends := pattern.FindAllStringSubmatch(string(content), -1)
 
@@ -100,7 +106,12 @@ func (e *EmailGetter) ExtractFromAPI(username string) bool {
 		return false
 	}
 
-	content := e.Request("https://api.github.com/users/" + username)
+	content, err := e.Request("https://api.github.com/users/" + username)
+
+	if err != nil {
+		return false
+	}
+
 	output := string(content) /* Convert to facilitate readability */
 
 	if strings.Contains(output, "rate limit exceeded") {
@@ -122,7 +133,12 @@ func (e *EmailGetter) ExtractFromAPI(username string) bool {
 // limited, scan the user's profile page, find an hexadecimal encoded email
 // address and decode it to a human readable string.
 func (e *EmailGetter) ExtractFromProfile(username string) bool {
-	content := e.Request("https://github.com/" + username)
+	content, err := e.Request("https://github.com/" + username)
+
+	if err != nil {
+		return false
+	}
+
 	pattern := regexp.MustCompile(`"mailto:([^"]+)"`)
 	data := pattern.FindStringSubmatch(string(content))
 
@@ -151,12 +167,22 @@ func (e *EmailGetter) ExtractFromActivity(username string) bool {
 		return false
 	}
 
-	content := e.Request("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
+	content, err := e.Request("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
+
+	if err != nil {
+		return false
+	}
+
 	pattern := regexp.MustCompile(`"full_name": "([^"]+)",`)
 	data := pattern.FindStringSubmatch(string(content))
 
 	if len(data) == 2 && data[1] != "" {
-		commits := e.Request("https://api.github.com/repos/" + data[1] + "/commits")
+		commits, err := e.Request("https://api.github.com/repos/" + data[1] + "/commits")
+
+		if err != nil {
+			return false
+		}
+
 		expression := regexp.MustCompile(`"email": "([^"]+)",`)
 		matches := expression.FindAllStringSubmatch(string(commits), -1)
 
@@ -170,39 +196,29 @@ func (e *EmailGetter) ExtractFromActivity(username string) bool {
 	return false
 }
 
-var httpClient = http.Client{}
+var httpClient = http.Client{Timeout: time.Minute}
 
 // Request sends a HTTP GET request to the URL passed in the parameters.
-func (e *EmailGetter) Request(url string) []byte {
-	req, err := http.NewRequest("GET", url, nil)
+func (e *EmailGetter) Request(target string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, target, nil)
 
-	req.Header.Set("DNT", "1")
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("Upgrade-Insecure-Requests", "1")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.8")
+	if err != nil {
+		return nil, err
+	}
+
 	req.Header.Set("User-Agent", "Mozilla/5.0 (KHTML, like Gecko) Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+
+	res, err := httpClient.Do(req)
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	resp, err := httpClient.Do(req)
+	defer res.Body.Close()
 
-	if err != nil {
-		panic(err)
-	}
+	reader := io.LimitReader(res.Body, 2<<20)
 
-	defer resp.Body.Close()
-
-	// I understand that ioutil.ReadAll is bad.
-	content, err := ioutil.ReadAll(resp.Body)
-
-	if err != nil {
-		panic(err)
-	}
-
-	return content
+	return ioutil.ReadAll(reader)
 }
 
 // AppendEmail will insert a new entry into the email address list.
