@@ -24,6 +24,11 @@ type EmailGetter struct {
 	PageNumber int
 }
 
+var reEmail = regexp.MustCompile(`"email": "([^"]+)",`)
+var reImage = regexp.MustCompile(`<img alt="@([^"]+)"`)
+var reMailto = regexp.MustCompile(`"mailto:([^"]+)"`)
+var reFullname = regexp.MustCompile(`"full_name": "([^"]+)",`)
+
 // RetrieveEmail contacts multiple websites looking for a valid email address
 // that may be associated to the submitted username. At first, the program will
 // try to find a valid email address in the (rate-limited) public API service,
@@ -84,8 +89,7 @@ func (e *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string, group st
 		return
 	}
 
-	pattern := regexp.MustCompile(`<img alt="@([^"]+)"`)
-	friends := pattern.FindAllStringSubmatch(string(content), -1)
+	friends := reImage.FindAllStringSubmatch(string(content), -1)
 
 	for _, data := range friends {
 		if data[1] != username {
@@ -119,8 +123,7 @@ func (e *EmailGetter) ExtractFromAPI(username string) bool {
 		return false
 	}
 
-	pattern := regexp.MustCompile(`"email": "([^"]+)",`)
-	data := pattern.FindStringSubmatch(output)
+	data := reEmail.FindStringSubmatch(output)
 
 	if len(data) == 2 && data[1] != "" {
 		return e.AppendEmail(data[1])
@@ -139,8 +142,7 @@ func (e *EmailGetter) ExtractFromProfile(username string) bool {
 		return false
 	}
 
-	pattern := regexp.MustCompile(`"mailto:([^"]+)"`)
-	data := pattern.FindStringSubmatch(string(content))
+	data := reMailto.FindStringSubmatch(string(content))
 
 	if len(data) == 2 && data[1] != "" {
 		urlEncoded := data[1]
@@ -173,8 +175,7 @@ func (e *EmailGetter) ExtractFromActivity(username string) bool {
 		return false
 	}
 
-	pattern := regexp.MustCompile(`"full_name": "([^"]+)",`)
-	data := pattern.FindStringSubmatch(string(content))
+	data := reFullname.FindStringSubmatch(string(content))
 
 	if len(data) == 2 && data[1] != "" {
 		commits, err := e.Request("https://api.github.com/repos/" + data[1] + "/commits")
@@ -183,8 +184,7 @@ func (e *EmailGetter) ExtractFromActivity(username string) bool {
 			return false
 		}
 
-		expression := regexp.MustCompile(`"email": "([^"]+)",`)
-		matches := expression.FindAllStringSubmatch(string(commits), -1)
+		matches := reEmail.FindAllStringSubmatch(string(commits), -1)
 
 		for _, match := range matches {
 			e.AppendEmail(match[1])
