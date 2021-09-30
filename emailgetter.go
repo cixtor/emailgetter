@@ -21,6 +21,7 @@ type EmailGetter struct {
 	Addresses  []string
 	RateLimit  bool
 	OnlyUsers  bool
+	DebugMode  bool
 	PageNumber int
 }
 
@@ -200,6 +201,10 @@ var httpClient = http.Client{Timeout: time.Minute}
 
 // Request sends a HTTP GET request to the URL passed in the parameters.
 func (e *EmailGetter) Request(target string) ([]byte, error) {
+	if e.DebugMode {
+		fmt.Println(target)
+	}
+
 	req, err := http.NewRequest(http.MethodGet, target, nil)
 
 	if err != nil {

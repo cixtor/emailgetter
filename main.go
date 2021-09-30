@@ -7,12 +7,14 @@ import (
 	"sync"
 )
 
+var debugMode bool
 var followers bool
 var following bool
 var onlyUsernames bool
 var pageNumber int
 
 func main() {
+	flag.BoolVar(&debugMode, "debug", false, "Print the URLs that are being requested")
 	flag.BoolVar(&followers, "followers", false, "Print the email(s) associated to each follower")
 	flag.BoolVar(&following, "following", false, "Print the email(s) associated to each following")
 	flag.BoolVar(&onlyUsernames, "only-usernames", false, "Print following/followers usernames instead of emails")
@@ -35,6 +37,7 @@ func main() {
 	var wg sync.WaitGroup
 	var getter EmailGetter
 
+	getter.DebugMode = debugMode
 	getter.PageNumber = pageNumber
 
 	if onlyUsernames {
