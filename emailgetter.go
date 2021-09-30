@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -111,23 +112,17 @@ func (e *EmailGetter) ExtractFromAPI(username string) bool {
 		return false
 	}
 
-	content, err := e.Request("https://api.github.com/users/" + username)
+	out, err := e.Request("https://api.github.com/users/" + username)
 
 	if err != nil {
 		return false
 	}
 
-	output := string(content) /* Convert to facilitate readability */
+	data := reEmail.FindSubmatch(out)
 
-	if strings.Contains(output, "rate limit exceeded") {
-		e.RateLimit = true
-		return false
-	}
-
-	data := reEmail.FindStringSubmatch(output)
-
-	if len(data) == 2 && data[1] != "" {
-		return e.AppendEmail(data[1])
+	// Minimal email address is x@y
+	if len(data) == 2 && len(data[1]) >= 3 {
+		return e.AppendEmail(string(data[1]))
 	}
 
 	return false
@@ -199,6 +194,8 @@ func (e *EmailGetter) ExtractFromActivity(username string) bool {
 
 var httpClient = http.Client{Timeout: time.Minute}
 
+var errRateLimitExceeded = fmt.Errorf("rate limit exceeded")
+
 // Request sends a HTTP GET request to the URL passed in the parameters.
 func (e *EmailGetter) Request(target string) ([]byte, error) {
 	if e.DebugMode {
@@ -222,8 +219,18 @@ func (e *EmailGetter) Request(target string) ([]byte, error) {
 	defer res.Body.Close()
 
 	reader := io.LimitReader(res.Body, 2<<20)
+	out, err := ioutil.ReadAll(reader)
 
-	return ioutil.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	if bytes.Contains(out, []byte("rate limit exceeded")) {
+		e.RateLimit = true
+		return nil, errRateLimitExceeded
+	}
+
+	return out, nil
 }
 
 // AppendEmail will insert a new entry into the email address list.
