@@ -168,31 +168,31 @@ func (e *EmailGetter) ExtractFromActivity(username string) bool {
 		return false
 	}
 
-	content, err := e.Request("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
+	out, err := e.Request("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
 
 	if err != nil {
 		return false
 	}
 
-	data := reFullname.FindStringSubmatch(string(content))
+	data := reFullname.FindSubmatch(out)
 
-	if len(data) == 2 && data[1] != "" {
-		commits, err := e.Request("https://api.github.com/repos/" + data[1] + "/commits")
-
-		if err != nil {
-			return false
-		}
-
-		matches := reEmail.FindAllStringSubmatch(string(commits), -1)
-
-		for _, match := range matches {
-			e.AppendEmail(match[1])
-		}
-
-		return len(matches) > 0
+	if len(data) < 2 || len(data[1]) < 3 {
+		return false
 	}
 
-	return false
+	commits, err := e.Request("https://api.github.com/repos/" + string(data[1]) + "/commits")
+
+	if err != nil {
+		return false
+	}
+
+	matches := reEmail.FindAllSubmatch(commits, -1)
+
+	for _, match := range matches {
+		e.AppendEmail(string(match[1]))
+	}
+
+	return len(matches) > 0
 }
 
 var httpClient = http.Client{Timeout: time.Minute}
