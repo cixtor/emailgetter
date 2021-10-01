@@ -132,26 +132,29 @@ func (e *EmailGetter) ExtractFromAPI(username string) bool {
 // limited, scan the user's profile page, find an hexadecimal encoded email
 // address and decode it to a human readable string.
 func (e *EmailGetter) ExtractFromProfile(username string) bool {
-	content, err := e.Request("https://github.com/" + username)
+	out, err := e.Request("https://github.com/" + username)
 
 	if err != nil {
 		return false
 	}
 
-	data := reMailto.FindStringSubmatch(string(content))
+	data := reMailto.FindSubmatch(out)
 
-	if len(data) == 2 && data[1] != "" {
-		urlEncoded := data[1]
-
-		urlEncoded = strings.Replace(urlEncoded, ";", "", -1)
-		urlEncoded = strings.Replace(urlEncoded, "&#x", "%", -1)
-
-		if out, err := url.QueryUnescape(urlEncoded); err == nil {
-			return e.AppendEmail(out)
-		}
+	if len(data) < 2 || len(data[1]) < 3 {
+		return false
 	}
 
-	return false
+	s := string(data[1])
+	s = strings.Replace(s, ";", "", -1)
+	s = strings.Replace(s, "&#x", "%", -1)
+
+	clean, err := url.QueryUnescape(s)
+
+	if err != nil {
+		return false
+	}
+
+	return e.AppendEmail(clean)
 }
 
 // ExtractFromActivity will read and extract every valid email address from the
