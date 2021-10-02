@@ -174,25 +174,35 @@ func (e *EmailGetter) ExtractFromActivity(username string) bool {
 		return false
 	}
 
-	data := reFullname.FindSubmatch(out)
+	matches := reFullname.FindAllSubmatch(out, -1)
 
-	if len(data) < 2 || len(data[1]) < 3 {
-		return false
+	for _, match := range matches {
+		if len(match) != 2 {
+			continue
+		}
+
+		e.ExtractFromCommits(string(match[1]))
 	}
 
-	commits, err := e.Request("https://api.github.com/repos/" + string(data[1]) + "/commits")
+	return false
+}
+
+func (e *EmailGetter) ExtractFromCommits(repo string) {
+	commits, err := e.Request("https://api.github.com/repos/" + repo + "/commits")
 
 	if err != nil {
-		return false
+		return
 	}
 
 	matches := reEmail.FindAllSubmatch(commits, -1)
 
 	for _, match := range matches {
+		if len(match) != 2 {
+			continue
+		}
+
 		e.AppendEmail(string(match[1]))
 	}
-
-	return len(matches) > 0
 }
 
 var httpClient = http.Client{Timeout: time.Minute}
