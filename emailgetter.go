@@ -19,7 +19,8 @@ import (
 // or not, whether the program is limited to scan the users and the page number
 // in case the user decided to scan the followers or following pages.
 type EmailGetter struct {
-	Addresses  []string
+	sync.Mutex
+	Addresses  map[string]bool
 	RateLimit  bool
 	OnlyUsers  bool
 	DebugMode  bool
@@ -30,6 +31,12 @@ var reEmail = regexp.MustCompile(`"email": "([^"]+)",`)
 var reImage = regexp.MustCompile(`<img alt="@([^"]+)"`)
 var reMailto = regexp.MustCompile(`"mailto:([^"]+)"`)
 var reFullname = regexp.MustCompile(`"full_name": "([^"]+)",`)
+
+func NewEmailGetter() *EmailGetter {
+	return &EmailGetter{
+		Addresses: map[string]bool{},
+	}
+}
 
 // RetrieveEmail contacts multiple websites looking for a valid email address
 // that may be associated to the submitted username. At first, the program will
@@ -122,7 +129,7 @@ func (e *EmailGetter) ExtractFromAPI(username string) bool {
 
 	// Minimal email address is x@y
 	if len(data) == 2 && len(data[1]) >= 3 {
-		return e.AppendEmail(string(data[1]))
+		return e.PrintEmail(string(data[1]))
 	}
 
 	return false
@@ -154,7 +161,7 @@ func (e *EmailGetter) ExtractFromProfile(username string) bool {
 		return false
 	}
 
-	return e.AppendEmail(clean)
+	return e.PrintEmail(clean)
 }
 
 // ExtractFromActivity will read and extract every valid email address from the
@@ -201,7 +208,7 @@ func (e *EmailGetter) ExtractFromCommits(repo string) {
 			continue
 		}
 
-		e.AppendEmail(string(match[1]))
+		e.PrintEmail(string(match[1]))
 	}
 }
 
@@ -246,27 +253,17 @@ func (e *EmailGetter) Request(target string) ([]byte, error) {
 	return out, nil
 }
 
-// AppendEmail will insert a new entry into the email address list.
-func (e *EmailGetter) AppendEmail(email string) bool {
-	var isAlreadyAdded bool
-
-	for _, item := range e.Addresses {
-		if item == email {
-			isAlreadyAdded = true
-			break
-		}
+// PrintEmail writes an email address to /dev/stdout if unique.
+func (e *EmailGetter) PrintEmail(email string) bool {
+	if _, seen := e.Addresses[email]; seen {
+		return false
 	}
 
-	if !isAlreadyAdded {
-		e.Addresses = append(e.Addresses, email)
-	}
+	e.Lock()
+	e.Addresses[email] = true
+	e.Unlock()
+
+	fmt.Println(email)
 
 	return true
-}
-
-// PrintEmails will send all the collected emails to os.Stdout
-func (e *EmailGetter) PrintEmails() {
-	for _, email := range e.Addresses {
-		fmt.Println(email)
-	}
 }

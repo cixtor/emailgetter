@@ -35,7 +35,7 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	var getter EmailGetter
+	getter := NewEmailGetter()
 
 	getter.DebugMode = debugMode
 	getter.PageNumber = pageNumber
@@ -54,6 +54,4 @@ func main() {
 	}
 
 	wg.Wait()
-
-	getter.PrintEmails()
 }
