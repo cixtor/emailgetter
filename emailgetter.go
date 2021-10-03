@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,9 +20,9 @@ import (
 // or not, whether the program is limited to scan the users and the page number
 // in case the user decided to scan the followers or following pages.
 type EmailGetter struct {
-	sync.Mutex
-	Addresses  map[string]bool
-	RateLimit  bool
+	wg         sync.WaitGroup
+	reqLock    chan bool
+	Addresses  sync.Map
 	OnlyUsers  bool
 	DebugMode  bool
 	PageNumber int
@@ -32,9 +33,10 @@ var reImage = regexp.MustCompile(`<img alt="@([^"]+)"`)
 var reMailto = regexp.MustCompile(`"mailto:([^"]+)"`)
 var reFullname = regexp.MustCompile(`"full_name": "([^"]+)",`)
 
-func NewEmailGetter() *EmailGetter {
+func NewEmailGetter(maxRequests int) *EmailGetter {
 	return &EmailGetter{
-		Addresses: map[string]bool{},
+		reqLock:   make(chan bool, maxRequests),
+		Addresses: sync.Map{},
 	}
 }
 
@@ -46,8 +48,11 @@ func NewEmailGetter() *EmailGetter {
 // scan the other public API service (if the rate limit is not exceeded) for the
 // most recent activity in any of the repositories managed by that account, then
 // will extract all the valid email addresses from that output.
-func (e *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
-	defer wg.Done()
+func (e *EmailGetter) RetrieveEmail(username string) {
+	e.wg.Add(1)
+	e.reqLock <- true
+	defer e.wg.Done()
+	defer func() { <-e.reqLock }()
 
 	if e.OnlyUsers {
 		fmt.Println(username)
@@ -70,15 +75,15 @@ func (e *EmailGetter) RetrieveEmail(wg *sync.WaitGroup, username string) {
 // RetrieveFollowers will try to find a valid email address for all the user
 // accounts that are following the submitted username. By default, each full
 // page in the followers section has 50 entries at a maximum.
-func (e *EmailGetter) RetrieveFollowers(wg *sync.WaitGroup, username string) {
-	e.FriendEmails(wg, username, "followers")
+func (e *EmailGetter) RetrieveFollowers(username string) {
+	e.FriendEmails(username, "followers")
 }
 
 // RetrieveFollowing will try to find a valid email address for all the user
 // accounts that are being followed by the submitted username. By default, each
 // full page in the followers section has 50 entries at a maximum.
-func (e *EmailGetter) RetrieveFollowing(wg *sync.WaitGroup, username string) {
-	e.FriendEmails(wg, username, "following")
+func (e *EmailGetter) RetrieveFollowing(username string) {
+	e.FriendEmails(username, "following")
 }
 
 // FriendEmails scrappes the content of a public user's profile in search for a
@@ -87,7 +92,7 @@ func (e *EmailGetter) RetrieveFollowing(wg *sync.WaitGroup, username string) {
 // user's account that allows him to either hide the email or submit any valid
 // address to be seen by the public, so in many cases the information provided
 // here is not accurate.
-func (e *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string, group string) {
+func (e *EmailGetter) FriendEmails(username string, group string) {
 	if e.PageNumber > 1 {
 		group += "?page=" + strconv.Itoa(e.PageNumber)
 	}
@@ -101,10 +106,11 @@ func (e *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string, group st
 	friends := reImage.FindAllStringSubmatch(string(content), -1)
 
 	for _, data := range friends {
-		if data[1] != username {
-			wg.Add(1) /* Add more emails */
-			go e.RetrieveEmail(wg, data[1])
+		if data[1] == username {
+			continue
 		}
+
+		go e.RetrieveEmail(data[1])
 	}
 }
 
@@ -114,11 +120,6 @@ func (e *EmailGetter) FriendEmails(wg *sync.WaitGroup, username string, group st
 // returned as the result of this operation due to the impossibility of the
 // program to determine which address is the real user's email.
 func (e *EmailGetter) ExtractFromAPI(username string) bool {
-	/* Skip if API is rate limited */
-	if e.RateLimit {
-		return false
-	}
-
 	out, err := e.Request("https://api.github.com/users/" + username)
 
 	if err != nil {
@@ -170,11 +171,6 @@ func (e *EmailGetter) ExtractFromProfile(username string) bool {
 // and commented by the user as well as additional information that, in certain
 // cases, might be considered sensitive.
 func (e *EmailGetter) ExtractFromActivity(username string) bool {
-	/* Skip if API is rate limited */
-	if e.RateLimit {
-		return false
-	}
-
 	out, err := e.Request("https://api.github.com/users/" + username + "/repos?type=owner&sort=updated")
 
 	if err != nil {
@@ -214,8 +210,6 @@ func (e *EmailGetter) ExtractFromCommits(repo string) {
 
 var httpClient = http.Client{Timeout: time.Minute}
 
-var errRateLimitExceeded = fmt.Errorf("rate limit exceeded")
-
 // Request sends a HTTP GET request to the URL passed in the parameters.
 func (e *EmailGetter) Request(target string) ([]byte, error) {
 	if e.DebugMode {
@@ -245,9 +239,29 @@ func (e *EmailGetter) Request(target string) ([]byte, error) {
 		return nil, err
 	}
 
+	// Exceeding the rate limit:
+	//
+	// > HTTP/2 403
+	// > Date: Tue, 20 Aug 2013 14:50:41 GMT
+	// > x-ratelimit-limit: 60
+	// > x-ratelimit-remaining: 0
+	// > x-ratelimit-used: 60
+	// > x-ratelimit-reset: 1377013266
+	// >
+	// > {"message":"API rate limit exceeded for 0.0.0.0.", ...}
+	//
+	// Source: https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting
+	if res.StatusCode == http.StatusForbidden {
+		ts, _ := strconv.ParseInt(res.Header.Get("X-RateLimit-Reset"), 10, 64)
+		fmt.Printf("rate limit exceeded; try again at %s\n", time.Unix(ts, 0))
+		os.Exit(1)
+		return nil, nil
+	}
+
 	if bytes.Contains(out, []byte("rate limit exceeded")) {
-		e.RateLimit = true
-		return nil, errRateLimitExceeded
+		fmt.Printf("%s\n", out)
+		os.Exit(1)
+		return nil, nil
 	}
 
 	return out, nil
@@ -259,13 +273,12 @@ func (e *EmailGetter) PrintEmail(email string) bool {
 		return false
 	}
 
-	if _, seen := e.Addresses[email]; seen {
+	// Skip if the email has already been printed before.
+	if _, ok := e.Addresses.Load(email); ok {
 		return false
 	}
 
-	e.Lock()
-	e.Addresses[email] = true
-	e.Unlock()
+	e.Addresses.Store(email, true)
 
 	fmt.Println(email)
 

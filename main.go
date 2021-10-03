@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"sync"
 )
 
 var debugMode bool
@@ -34,8 +33,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	var wg sync.WaitGroup
-	getter := NewEmailGetter()
+	getter := NewEmailGetter(20)
 
 	getter.DebugMode = debugMode
 	getter.PageNumber = pageNumber
@@ -44,14 +42,13 @@ func main() {
 		getter.OnlyUsers = true
 	}
 
-	wg.Add(1) /* At least wait for one */
-	go getter.RetrieveEmail(&wg, username)
+	getter.RetrieveEmail(username)
 
 	if following {
-		getter.RetrieveFollowing(&wg, username)
+		getter.RetrieveFollowing(username)
 	} else if followers {
-		getter.RetrieveFollowers(&wg, username)
+		getter.RetrieveFollowers(username)
 	}
 
-	wg.Wait()
+	getter.wg.Wait()
 }
