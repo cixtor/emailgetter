@@ -46,7 +46,9 @@ func main() {
 
 	if following {
 		getter.RetrieveFollowing(username)
-	} else if followers {
+	}
+
+	if followers {
 		getter.RetrieveFollowers(username)
 	}
 
