@@ -223,6 +223,7 @@ func (e *EmailGetter) Request(target string) ([]byte, error) {
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (KHTML, like Gecko) Safari/537.36")
+	req.Header.Set("Authorization", "token "+ghp)
 
 	res, err := httpClient.Do(req)
 
