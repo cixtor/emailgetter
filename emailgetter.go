@@ -269,7 +269,8 @@ func (e *EmailGetter) Request(target string) ([]byte, error) {
 
 // PrintEmail writes an email address to /dev/stdout if unique.
 func (e *EmailGetter) PrintEmail(email string) bool {
-	if strings.HasSuffix(email, "@users.noreply.github.com") {
+	if email == "noreply@github.com" ||
+		strings.HasSuffix(email, "@users.noreply.github.com") {
 		return false
 	}
 
